@@ -1,0 +1,149 @@
+@startuml
+' Simplified class diagram: one class per role, plus the records they work on.
+' Admin, Manager, Employee and Customer are all User records (bms.h) told
+' apart by their role; the methods are the menu operations in admin.c,
+' manager.c, employee.c and customer.c. The full module-level diagram is
+' class_diagram.puml.
+
+!pragma layout smetana
+set separator none
+skinparam monochrome true
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam defaultFontName Serif
+hide empty members
+
+title Class Diagram for Banking Management System
+
+class Bank {
+  -port : int
+  -data_dir : string
+  +main()
+  +handle_client(int fd)
+  +login()
+  +check_login(int uid, const char *password, ...)
+  +customer_menu(int uid)
+  +employee_menu(int uid)
+  +manager_menu(int uid)
+  +admin_menu(int uid)
+  +exit_session()
+  -recover_journal(const char *when)
+}
+
+class Admin {
+  -id : int
+  -username : string
+  -pwhash : string
+  -name : string
+  -phone : string
+  -address : string
+  +create_user_interactive(ROLE_EMPLOYEE, ...)
+  +modify_user(...)
+  +manage_roles(...)
+  +set_staff_active(...)
+  +reset_password(...)
+  +change_password(int uid)
+}
+
+class Manager {
+  -id : int
+  -username : string
+  -pwhash : string
+  -name : string
+  -active : int
+  +set_customer_active(...)
+  +assign_loan(...)
+  +review_feedback(int uid)
+  +change_password(int uid)
+}
+
+class Employee {
+  -id : int
+  -username : string
+  -pwhash : string
+  -name : string
+  -active : int
+  +create_user_interactive(ROLE_CUSTOMER, ...)
+  +modify_customer(...)
+  +process_loan(int uid)
+  +decide_loan(int uid)
+  +view_assigned(int uid)
+  +passbook(...)
+  +close_account(...)
+  +change_password(int uid)
+}
+
+class Customer {
+  -id : int
+  -username : string
+  -pwhash : string
+  -name : string
+  -phone : string
+  -address : string
+  -balance : int64
+  -active : int
+  -created_by : int
+  +view_balance(int uid)
+  +deposit(int uid)
+  +withdraw(int uid)
+  +transfer(int uid)
+  +apply_loan(int uid)
+  +view_loans(int uid)
+  +repay_loan(int uid)
+  +add_feedback(int uid)
+  +view_feedback(int uid)
+  +print_transactions(int customer_id)
+  +change_password(int uid)
+}
+
+class Loan {
+  -id : int
+  -customer_id : int
+  -employee_id : int
+  -amount : int64
+  -tenure_months : int
+  -status : int
+  -purpose : string
+  -note : string
+}
+
+class Transaction {
+  -id : int
+  -customer_id : int
+  -type : int
+  -counterparty_id : int
+  -amount : int64
+  -balance_after : int64
+  -timestamp : int64
+}
+
+class Feedback {
+  -id : int
+  -customer_id : int
+  -text : string
+  -reviewed : int
+  -reply : string
+}
+
+Bank "1" ..> "1..*" Admin : handles
+Bank "1" ..> "*" Manager : handles
+Bank "1" ..> "*" Employee : handles
+Bank "1" ..> "*" Customer : handles
+
+Admin "1" --> "*" Employee : adds / manages
+Admin "1" --> "*" Manager : promotes / manages
+Admin "1" ..> "*" Customer : modifies / resets password
+
+Manager "*" ..> "*" Customer : activates / deactivates
+Manager "*" ..> "*" Loan : assigns to employee
+Manager "*" ..> "*" Feedback : reviews / replies
+
+Employee "1" --> "*" Customer : opens / manages
+Employee "1" o-- "*" Loan : processes / decides
+Employee "*" ..> "*" Transaction : views (passbook)
+
+Customer "1" *-- "0..*" Transaction : has
+Customer "1" o-- "0..*" Loan : applies for
+Customer "1" o-- "0..*" Feedback : submits
+
+@enduml
