@@ -1,5 +1,0 @@
-Blueprint/Class Diagram: Demonstrates the system architecture and class structures.
-Working Code: Code implementation for all modules (Customer, Employee, Manager, Administrator) covering:
-Account management, transactions, and loan processing.
-Concurrency and Synchronization: Demonstration of process synchronization using file management and locking mechanisms, ensuring proper handling of race conditions.
-ACID Properties: Financial operations must meet the ACID properties (Atomicity, Consistency, Isolation, Durability).
