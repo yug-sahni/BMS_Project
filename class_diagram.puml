@@ -1,0 +1,358 @@
+@startuml
+' Banking Management System - class diagram.
+' The project is written in C, so "classes" here are:
+'   <<record>>  fixed-size structs stored in data/*.dat (include/bms.h)
+'   <<module>>  a .c file with its public functions (+) and key static ones (-)
+'   <<enum>>    the constants in bms.h / store.h
+
+!pragma layout smetana
+set separator none
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+hide empty members
+
+title Banking Management System (C, fork-per-client server)
+
+' ---------------------------------------------------------------- enums
+package "Constants (bms.h, store.h)" {
+  enum Role {
+    ROLE_CUSTOMER = 1
+    ROLE_EMPLOYEE = 2
+    ROLE_MANAGER = 3
+    ROLE_ADMIN = 4
+  }
+  enum TxnType {
+    TXN_DEPOSIT = 1
+    TXN_WITHDRAW = 2
+    TXN_TRANSFER_OUT = 3
+    TXN_TRANSFER_IN = 4
+    TXN_LOAN_CREDIT = 5
+    TXN_LOAN_REPAY = 6
+    TXN_CLOSURE = 7
+  }
+  enum LoanStatus {
+    LOAN_PENDING = 1
+    LOAN_ASSIGNED = 2
+    LOAN_PROCESSING = 3
+    LOAN_APPROVED = 4
+    LOAN_REJECTED = 5
+    LOAN_REPAID = 6
+  }
+  enum JournalState {
+    JOURNAL_FREE = 0
+    JOURNAL_COMMITTED = 1
+  }
+  enum FileId {
+    FILE_USERS
+    FILE_TXNS
+    FILE_LOANS
+    FILE_FEEDBACK
+    FILE_JOURNAL
+  }
+}
+
+' ---------------------------------------------------------------- records
+package "Records (bms.h) - one file each in data/" {
+  class User <<record>> {
+    +id : int32
+    +role : int32
+    +active : int32
+    +failed_logins : int32
+    +balance : int64
+    +locked_until : int64
+    +closed_at : int64
+    +created_by : int32
+    +username : char[32]
+    +pwhash : char[128]
+    +name : char[64]
+    +phone : char[16]
+    +address : char[128]
+    +status_note : char[128]
+  }
+  class Transaction <<record>> {
+    +id : int32
+    +customer_id : int32
+    +type : int32
+    +counterparty_id : int32
+    +amount : int64
+    +balance_after : int64
+    +timestamp : int64
+  }
+  class Loan <<record>> {
+    +id : int32
+    +customer_id : int32
+    +status : int32
+    +employee_id : int32
+    +amount : int64
+    +tenure_months : int32
+    +prev_employee_id : int32
+    +applied_at : int64
+    +decided_at : int64
+    +repaid_at : int64
+    +purpose : char[128]
+    +note : char[128]
+  }
+  class Feedback <<record>> {
+    +id : int32
+    +customer_id : int32
+    +reviewed : int32
+    +reviewer_id : int32
+    +timestamp : int64
+    +replied_at : int64
+    +text : char[256]
+    +reply : char[256]
+  }
+  class JournalEntry <<record>> {
+    +id : int32
+    +state : int32
+    +naccounts : int32
+    +ntxns : int32
+    +account_id : int32[2]
+    +balance : int64[2]
+    +txn : Transaction[2]
+  }
+}
+
+class LockSet <<struct>> {
+  +n : int
+  +ids : int[16]
+}
+
+class Slot <<struct>> {
+  +uid : int
+  +pid : pid_t
+}
+
+' ---------------------------------------------------------------- infrastructure
+package "Infrastructure" {
+  class store <<module>> {
+    -fds : int[FILE_COUNT]
+    -locks_held : int
+    +store_open(dir) : int
+    +store_set_lock_hooks(first_locked, all_unlocked)
+    +rec_lock(f, id, type) : int
+    +rec_unlock(f, id) : int
+    +file_lock(f, type) : int
+    +file_unlock(f) : int
+    +rec_read(f, id, rec) : int
+    +rec_write(f, id, rec) : int
+    +rec_count(f) : int
+    +rec_append(f, rec) : int
+    +rec_append_locked(f, rec) : int
+    -check_format(dir) : int
+  }
+  class journal <<module>> {
+    +money_lock(ids, n, held) : int
+    +money_unlock(held)
+    +journal_set_balance(e, account_id, balance)
+    +journal_add_txn(e, customer_id, type, amount, balance_after, counterparty_id)
+    +journal_apply(e) : int
+    +journal_recover_all() : int
+    +fault_point(name)
+    -commit(e) : int
+    -finish(e, inject) : int
+  }
+  class session <<module>> {
+    -shm_id : int
+    -sem_id : int
+    -table : Slot*
+    +session_init() : int
+    +session_destroy()
+    +session_acquire(uid) : int
+    +session_release(uid)
+  }
+  class net <<module>> {
+    -conn_fd : int
+    -hold_buf : char*
+    +net_init(fd, on_disconnect)
+    +net_send(buf, len)
+    +net_puts(s)
+    +net_printf(fmt, ...)
+    +net_hold()
+    +net_flush()
+    +net_request_stop()
+    +net_readline(buf, size)
+    +prompt_line(label, buf, size)
+    +prompt_secret(label, buf, size)
+    +prompt_int(label, min, max, out) : int
+    +prompt_amount(label, paise) : int
+    +fmt_amount(paise, buf, size) : char*
+    +fmt_time(t, buf, size) : char*
+  }
+  class auth <<module>> {
+    +hash_password(password, out, size) : int
+    +verify_password(password, hash) : int
+  }
+}
+
+' ---------------------------------------------------------------- business logic
+package "Business logic" {
+  class common_ops <<module>> {
+    +role_name(role) : char*
+    +txn_type_name(type) : char*
+    +loan_status_name(status) : char*
+    +account_status(u) : char*
+    +valid_username(s) : int
+    +valid_password(s) : int
+    +valid_phone(s) : int
+    +get_user(id, out) : int
+    +find_user_by_username(username, out) : int
+    +create_user_interactive(role, creator) : int
+    +modify_user_interactive(id, allowed_mask)
+    +change_password(uid)
+    +session_still_valid(uid, role, out) : int
+    +print_transactions(customer_id)
+    +list_users(role_mask)
+    +print_loan(l)
+    +loan_txn_total(customer_id, loan_id, type, sum) : int
+    +loan_outstanding(l, out) : int
+    +customer_loan_debt(customer_id, out) : int
+    +loan_installment(l) : int64
+    +loan_is_open(l) : int
+    +reject_open_loans(customer_id, note) : int
+    +prompt_reason(label, buf, size) : int
+  }
+  class customer <<module>> {
+    +customer_menu(uid)
+    -view_balance(uid)
+    -deposit(uid)
+    -withdraw(uid)
+    -transfer(uid)
+    -apply_loan(uid)
+    -view_loans(uid)
+    -repay_loan(uid)
+    -pay_installment(uid, l, amount)
+    -add_feedback(uid)
+    -view_feedback(uid)
+  }
+  class employee <<module>> {
+    +employee_menu(uid)
+    -modify_customer()
+    -view_assigned(uid)
+    -process_loan(uid)
+    -decide_loan(uid)
+    -credit_loan(l) : int
+    -passbook()
+    -close_account()
+  }
+  class manager <<module>> {
+    +manager_menu(uid)
+    -set_customer_active()
+    -list_open_loans_and_employees()
+    -assign_loan()
+    -review_feedback(uid)
+  }
+  class admin <<module>> {
+    +admin_menu(uid)
+    -modify_user()
+    -manage_roles()
+    -set_staff_active()
+    -release_employee_loans(emp_id) : int
+    -reset_password()
+  }
+}
+
+' ---------------------------------------------------------------- executables
+package "Executables (main)" {
+  class bms_server <<program>> {
+    -children : pid_t*
+    -current_uid : int
+    -child_crashed : int
+    +main() : int
+    +exit_session()
+    -listen_on(port) : int
+    -handle_client(fd)
+    -login()
+    -check_login(uid, password, u) : int
+    -reap_children(block)
+    -recover_journal(when)
+    -stop_children()
+  }
+  class bms_client <<program>> {
+    -saved_tty : termios
+    +main(argc, argv) : int
+    -connect_to(host, port) : int
+    -set_echo(on)
+    -install_signal_handlers()
+  }
+  class bms_init <<program>> {
+    +main() : int
+    -read_line(label, buf, size, secret)
+  }
+  class bms_migrate <<program>> {
+    +main() : int
+    -convert(dir, name, old_size, new_size, fn) : int
+    -convert_user(in, out)
+    -convert_loan(in, out)
+    -convert_feedback(in, out)
+    -swap_in(dir, backup, name) : int
+  }
+}
+
+' ---------------------------------------------------------------- record relations
+User "1" -- "0..*" Transaction : customer_id >
+User "1" -- "0..*" Loan : applies (customer_id) >
+User "0..1" -- "0..*" Loan : handles (employee_id) >
+User "1" -- "0..*" Feedback : writes (customer_id) >
+User "0..1" -- "0..*" Feedback : reviews (reviewer_id) >
+User "0..1" -- "0..*" User : created_by >
+Loan "1" -- "0..*" Transaction : LOAN_CREDIT / LOAN_REPAY\n(counterparty_id) >
+JournalEntry *-- "0..2" Transaction : txn[]
+JournalEntry o-- "1..2" User : account_id[]
+
+User ..> Role
+Transaction ..> TxnType
+Loan ..> LoanStatus
+JournalEntry ..> JournalState
+
+' ---------------------------------------------------------------- module dependencies
+store ..> FileId
+store ..> User : users.dat
+store ..> Transaction : txns.dat
+store ..> Loan : loans.dat
+store ..> Feedback : feedback.dat
+store ..> JournalEntry : journal.dat
+
+journal ..> store : rec_lock / rec_write
+journal ..> LockSet
+journal ..> JournalEntry
+session *-- "256" Slot : SysV shm + semaphore
+
+common_ops ..> store
+common_ops ..> journal
+common_ops ..> net
+common_ops ..> auth
+
+customer ..> common_ops
+customer ..> journal : deposit / withdraw /\ntransfer / repay
+employee ..> common_ops
+employee ..> journal : loan credit /\naccount closure
+manager ..> common_ops
+admin ..> common_ops
+manager ..> store : loan locks
+admin ..> store : loan locks
+customer ..> net
+employee ..> net
+manager ..> net
+admin ..> net
+
+bms_server ..> session
+bms_server ..> store
+bms_server ..> journal : recover_all
+bms_server ..> net
+bms_server ..> auth
+bms_server ..> customer : customer_menu
+bms_server ..> employee : employee_menu
+bms_server ..> manager : manager_menu
+bms_server ..> admin : admin_menu
+
+bms_client ..> bms_server : TCP :8080
+
+bms_init ..> store
+bms_init ..> auth
+bms_migrate ..> User
+bms_migrate ..> Loan
+bms_migrate ..> Feedback
+bms_migrate ..> store : STORE_FORMAT
+
+@enduml
