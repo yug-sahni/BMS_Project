@@ -1,4 +1,4 @@
-# Banking Management System (V1)
+# Banking Management System 
 
 A CS-513 System Software mini project. It is a multi-client TCP banking server written in C on Linux. Customers, employees, managers and administrators log in from a terminal client. The server keeps all data in binary record files. It uses `fcntl()` record locks, a System V semaphore, shared memory, and one `fork()`ed process per client to stay consistent under concurrent use.
 
